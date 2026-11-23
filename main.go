@@ -94,10 +94,13 @@ func main() {
 		hub:       newHub(),
 		webFS:     mustWebFS(),
 		dots:      newDotStore(filepath.Join(filepath.Dir(aliasPath), "dotcache")),
+		subs:      newSubManager(filepath.Join(filepath.Dir(aliasPath), "subscriptions.json"),
+			filepath.Join(filepath.Dir(aliasPath), "subcache"), nil),
 		aliasPath: aliasPath,
 	}
 	log.Printf("[*] dpsmeter v%s 启动：http://%s（names=%s, alias=%s）", version, *addr, namesPath, aliasPath)
 	go s.dots.refresh() // 在线拉最新 index → 抽取 EnemyDot 编号表（fetch.go 同构）
+	go subLoop(s.subs)  // 订阅循环：启动刷一轮 + 配置 mtime/间隔触发的定时刷新
 
 	go s.readerLoop(*pollMs)
 	go s.publishLoop()

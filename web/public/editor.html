@@ -38,6 +38,7 @@ button.primary:hover { background: #3e6b4c; }
 .del:hover { border-color: var(--warn); }
 .top { display: flex; align-items: center; gap: 10px; }
 .top .grow { flex: 1; }
+.grow2 { flex: 1; }
 #status { font-size: 12px; }
 #status.dirty { color: var(--warn); }
 #status.ok { color: #4a7c59; }
@@ -87,6 +88,21 @@ button.primary:hover { background: #3e6b4c; }
     <h2>合并规则 <span class="hint">目标 ← 源列表（逗号分隔），a=我方 / v=敌方，声明顺序 = 冲突优先级</span></h2>
     <div id="mergeRows"></div>
     <div class="row"><button id="addMerge">+ 添加合并</button><span class="hint" id="mergeEmpty">暂无合并规则</span></div>
+  </div>
+
+  <div class="card">
+    <h2>规则订阅 <span class="hint">订阅层只补漏——本地命名/合并永远优先；URL 顺序 = 优先级（先者优先）</span></h2>
+    <div class="row">
+      <label><input type="checkbox" id="subEnabled"> 启用订阅</label>
+      <span class="hint">间隔</span>
+      <input type="text" id="subInterval" class="id" title="自动刷新间隔（分钟）">
+      <span class="hint">分钟</span>
+      <span class="grow2"></span>
+      <button id="subRefresh">保存并刷新</button>
+    </div>
+    <div id="subRows"></div>
+    <div class="row"><button id="addSub">+ 添加订阅源</button><span class="hint" id="subEmpty">暂无订阅源</span></div>
+    <p class="hint" id="subStat">订阅层加载中…</p>
   </div>
 
   <div class="card">
@@ -515,7 +531,101 @@ $("pvName").onclick = () => {
   rows[rows.length - 1].querySelector(".name").focus();
 };
 
+// ---------- 订阅管理（独立保存，不参与上方 dirty 体系） ----------
+const subUrls = [];
+let subEnabled = false;
+let subInterval = 30;
+
+function subStatusText(s) {
+  if (!s) return "";
+  const t = s.lastOk ? new Date(s.lastOk * 1000).toLocaleTimeString() : "从未";
+  const cnt = `命名 ${s.entries || 0} / 合并 ${s.merges || 0}`;
+  if (s.status === "ok") return `✓ ${cnt} · ${t}`;
+  if (s.status === "notmodified") return `＝ 未变化（304）· ${t}`;
+  if (s.status === "error") return `✗ ${s.err || "失败"} · 上次成功 ${t}`;
+  return "… 待刷新";
+}
+
+function subRow(i, st) {
+  const div = document.createElement("div");
+  div.className = "row";
+  const u = document.createElement("input");
+  u.type = "text"; u.className = "srcs"; u.value = subUrls[i];
+  u.placeholder = "https://cdn.jsdelivr.net/gh/<user>/<repo>@main/aliases.json";
+  u.oninput = () => { subUrls[i] = u.value.trim(); };
+  const stEl = document.createElement("span");
+  stEl.className = "hint"; stEl.dataset.sub = subUrls[i];
+  stEl.textContent = subStatusText(st);
+  const del = document.createElement("button");
+  del.className = "del"; del.textContent = "×"; del.title = "移除此订阅源";
+  del.onclick = () => { subUrls.splice(i, 1); renderSubs(); };
+  div.append(u, stEl, del);
+  return div;
+}
+
+function renderSubs() {
+  const box = $("subRows");
+  box.innerHTML = "";
+  subUrls.forEach((_, i) => box.appendChild(subRow(i, null)));
+  $("subEmpty").style.display = subUrls.length ? "none" : "";
+}
+
+async function loadSubs() {
+  try {
+    const st = await fetch("/api/subs").then((r) => r.json());
+    subEnabled = !!st.enabled;
+    subInterval = st.intervalMin || 30;
+    subUrls.length = 0;
+    (st.urls || []).forEach((s) => { subUrls.push(s.url); });
+    $("subEnabled").checked = subEnabled;
+    $("subInterval").value = subInterval;
+    renderSubs();
+    // 回填各 URL 状态
+    const rows = $("subRows").querySelectorAll(".row");
+    (st.urls || []).forEach((s, i) => {
+      const el = rows[i] && rows[i].querySelector("[data-sub]");
+      if (el) el.textContent = subStatusText(s);
+    });
+    const when = st.lastRefresh ? new Date(st.lastRefresh * 1000).toLocaleTimeString() : "从未";
+    $("subStat").textContent =
+      `订阅层当前生效：命名 ${st.subNames} / 合并 ${st.subMerges} 条 · 最近刷新 ${when}` +
+      (st.enabled ? "" : " ·（已停用）");
+  } catch {
+    $("subStat").textContent = "订阅状态获取失败";
+  }
+}
+
+async function saveSubs() {
+  const out = {
+    enabled: $("subEnabled").checked,
+    intervalMin: parseInt($("subInterval").value, 10) || 30,
+    urls: subUrls.filter(Boolean),
+  };
+  try {
+    const r = await fetch("/api/subsfile", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(out),
+    }).then((r) => r.json());
+    if (r.err) { $("subStat").textContent = "保存失败: " + r.err; return false; }
+    return true;
+  } catch {
+    $("subStat").textContent = "保存失败";
+    return false;
+  }
+}
+
+$("subRefresh").onclick = async () => {
+  $("subStat").textContent = "刷新中…";
+  if (!(await saveSubs())) return;
+  try { await fetch("/api/subs/refresh", { method: "POST" }); } catch { /* 后台继续 */ }
+  setTimeout(loadSubs, 2500); // 等拉取完成后回读状态
+};
+$("subEnabled").onchange = () => { subEnabled = $("subEnabled").checked; };
+$("subInterval").oninput = () => { subInterval = parseInt($("subInterval").value, 10) || 30; };
+$("addSub").onclick = () => { subUrls.push(""); renderSubs(); };
+
 loadCfg();
+loadSubs();
 </script>
 </body>
 </html>

@@ -10,9 +10,11 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -96,6 +98,7 @@ type server struct {
 	hub        *hub
 	webFS      http.FileSystem
 	dots       *dotStore
+	subs       *subManager
 	aliasPath  string
 	shmOk      atomic.Bool
 	lastSeq    atomic.Uint32 // 最近一次看到的 seq_total
@@ -246,6 +249,51 @@ func (s *server) routes() http.Handler {
 			return
 		}
 		log.Printf("[*] 别名配置已由编辑器保存（%s）", s.aliasPath)
+		writeJSON(w, 200, map[string]any{"ok": true})
+	})
+
+	// ===== 规则订阅 =====
+
+	// 订阅状态（URL 列表 + 逐条拉取状态 + 合并产物计数）
+	mux.HandleFunc("GET /api/subs", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, 200, s.subs.status())
+	})
+
+	// 保存订阅配置（校验 JSON 后写回；管理器 mtime 检测自动生效并立即刷新）
+	mux.HandleFunc("POST /api/subsfile", func(w http.ResponseWriter, r *http.Request) {
+		b, err := io.ReadAll(io.LimitReader(r.Body, 64<<10))
+		if err != nil {
+			writeJSON(w, 400, map[string]string{"err": "读取失败"})
+			return
+		}
+		var cfg struct {
+			Enabled     bool     `json:"enabled"`
+			IntervalMin int      `json:"intervalMin"`
+			Urls        []string `json:"urls"`
+		}
+		if err := json.Unmarshal(b, &cfg); err != nil {
+			writeJSON(w, 400, map[string]string{"err": "JSON 校验失败: " + err.Error()})
+			return
+		}
+		for _, u := range cfg.Urls {
+			pu, err := url.Parse(strings.TrimSpace(u))
+			if err != nil || (pu.Scheme != "http" && pu.Scheme != "https") || pu.Host == "" {
+				writeJSON(w, 400, map[string]string{"err": "URL 非法（须为 http/https）: " + u})
+				return
+			}
+		}
+		if err := os.WriteFile(s.subs.cfgPath, b, 0o644); err != nil {
+			writeJSON(w, 500, map[string]string{"err": "写入失败: " + err.Error()})
+			return
+		}
+		log.Printf("[*] 订阅配置已保存（%d 个 URL，启用=%v）", len(cfg.Urls), cfg.Enabled)
+		go s.subs.refreshNow() // 立即刷一轮；agg 经 sub_merged.json mtime 自动重载
+		writeJSON(w, 200, map[string]any{"ok": true})
+	})
+
+	// 手动立即刷新订阅
+	mux.HandleFunc("POST /api/subs/refresh", func(w http.ResponseWriter, r *http.Request) {
+		go s.subs.refreshNow()
 		writeJSON(w, 200, map[string]any{"ok": true})
 	})
 

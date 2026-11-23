@@ -234,6 +234,36 @@ func splitUnionFind(rawMerge json.RawMessage) (unionFind, unionFind) {
 	return newUnionFindFromRules(ally, false), newUnionFindFromRules(enemy, true)
 }
 
+// splitUnionFindCombined 订阅分层合并：规则列表 = 本地声明在前 + 订阅在后，
+// 「先声明者优先」的冲突裁决天然让本地规则压过订阅同名源；
+// 订阅只补本地未覆盖的源 id。
+func splitUnionFindCombined(local, sub json.RawMessage) (unionFind, unionFind) {
+	ally, enemy := splitMergeSides(local)
+	subAlly, subEnemy := splitMergeSides(sub)
+	return newUnionFindFromRules(append(ally, subAlly...), false),
+		newUnionFindFromRules(append(enemy, subEnemy...), true)
+}
+
+// fillSubNames 订阅命名补漏：只填本地未定义的 key（本地同名键永远赢）。
+// 返回补入条数。
+func fillSubNames(base *aliasNames, subCfg aliasConfig) int {
+	subAn, _ := parseAliasNames(subCfg.Names)
+	n := 0
+	for k, v := range subAn.Ally {
+		if _, ok := base.Ally[k]; !ok {
+			base.Ally[k] = v
+			n++
+		}
+	}
+	for k, v := range subAn.Enemy {
+		if _, ok := base.Enemy[k]; !ok {
+			base.Enemy[k] = v
+			n++
+		}
+	}
+	return n
+}
+
 // addEdge 添加一条 源→目标 边；冲突时先声明者优先，环边丢弃。
 func (u unionFind) addEdge(s, t uint32, ruleKey string) {
 	if s == t {

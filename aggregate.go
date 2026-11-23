@@ -6,6 +6,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"sync"
@@ -415,6 +416,7 @@ type agg struct {
 	alias     aliasNames // 命名配置（a=覆盖我方 / 未标记=兜底 / v=敌方）
 	uf        unionFind  // 我方伤害归属并查集（merge 组，按 ai）
 	ufV       unionFind  // 敌方受击归并并查集（merge 组，按 vi）
+	subMod    time.Time  // 订阅合并产物 mtime（变更触发叠加重载）
 }
 
 func newAgg(namesPath, aliasPath string) *agg {
@@ -449,24 +451,54 @@ func (a *agg) reloadNames() {
 }
 
 // reloadAliases 热载 data/aliases.json（自定义改名 + 伤害归属并查集）。
+// 叠加订阅层 data/subcache/sub_merged.json（subscribe.go 维护）：
+// 命名本地优先、订阅补漏；合并规则本地声明在前、订阅在后。
 // 注意：合并/改名只影响新消费的事件，已聚合历史不回溯重算。
 func (a *agg) reloadAliases() {
 	st, err := statFile(a.aliasPath)
 	if err != nil {
 		return
 	}
-	if !st.ModTime().After(a.aliasMod) {
+	subPath := a.subMergedPath()
+	subSt, subErr := statFile(subPath)
+	subChanged := subErr == nil && subSt.ModTime().After(a.subMod)
+	if subErr != nil && !a.subMod.IsZero() {
+		// 合并产物被移除（停用/清空订阅）→ 触发一次重载回到纯本地
+		subChanged = true
+	}
+	if !st.ModTime().After(a.aliasMod) && !subChanged {
 		return
 	}
 	cfg, an, nNames := loadAlias(a.aliasPath)
 	a.aliasMod = st.ModTime()
-	a.alias = an
-	a.uf, a.ufV = splitUnionFind(cfg.Merge)
-	nMerge := len(a.uf.reps) + len(a.ufV.reps)
-	if nNames > 0 || nMerge > 0 {
-		log.Printf("[*] 别名配置已载入：我方名 %d / 敌方名 %d / 合并 %d 组（我方 %d + 敌方 %d）",
-			len(an.Ally), len(an.Enemy), nMerge, len(a.uf.reps), len(a.ufV.reps))
+	if subChanged {
+		if subErr == nil {
+			a.subMod = subSt.ModTime()
+		} else {
+			a.subMod = time.Time{}
+		}
 	}
+
+	// 订阅层（文件不存在 = 无订阅/停用，纯本地）
+	nSub := 0
+	subCfg, readErr := readAliasFile(subPath)
+	if readErr == nil {
+		nSub = fillSubNames(&an, subCfg)
+		a.uf, a.ufV = splitUnionFindCombined(cfg.Merge, subCfg.Merge)
+	} else {
+		a.uf, a.ufV = splitUnionFind(cfg.Merge)
+	}
+	a.alias = an
+	nMerge := len(a.uf.reps) + len(a.ufV.reps)
+	if nNames > 0 || nMerge > 0 || nSub > 0 {
+		log.Printf("[*] 别名配置已载入：我方名 %d / 敌方名 %d / 合并 %d 组（我方 %d + 敌方 %d） / 订阅补入 %d 条",
+			len(an.Ally), len(an.Enemy), nMerge, len(a.uf.reps), len(a.ufV.reps), nSub)
+	}
+}
+
+// subMergedPath 订阅层合并产物路径（data/subcache/sub_merged.json）。
+func (a *agg) subMergedPath() string {
+	return filepath.Join(filepath.Dir(a.aliasPath), "subcache", "sub_merged.json")
 }
 
 func (a *agg) currentNames() map[string]string { return a.names }

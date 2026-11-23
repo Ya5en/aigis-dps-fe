@@ -13,6 +13,8 @@ WebView2 overlay 面板与浏览器规则编辑器——前端零计算，游戏
 - **实时统计**：每实例 DPS（600 帧滑窗）、受击方按 vi 聚合、会话历史（50 场）
 - **命名与合并**：我方/敌方改名、跨 id 归并（双侧独立并查集），`aliases.json`
   mtime 热载，另有在线规则编辑器（含敌方点阵动画预览，预览后一键落成命名规则）
+- **规则订阅**：从社区维护的订阅 URL 拉取别名规则（ETag 条件请求、大小上限、
+  schema 校验净化），分层合并——本地 `aliases.json` 永远优先，订阅只补漏
 - **名字表在线更新**：启动后台从 Worker 拉最新资源索引（XOR 0xDA 解密），逐级
   URL 哈希短路，失败沿用磁盘缓存
 - **敌方点阵预览**：EnemyDot aar → ALTX 图集 + AOD 时间轴动画（Stand/Walk/Attack/
@@ -121,6 +123,41 @@ NameText，亦可为查不到名的新 id 补名）；`v` = 敌方（按受击�
 按逆向定案的 ALTX 帧表 + AOD 时间轴播放动画（锚点对齐），亦可看全图集；
 预览后可一键落成命名规则。
 
+## 规则订阅
+
+社区共同维护的别名规则（新单位改名、合并组）通过订阅 URL 分发，用户只需订阅，
+不必手编 JSON。推荐订阅源形态：GitHub 仓库里的 `aliases.json` +
+jsDelivr CDN（`https://cdn.jsdelivr.net/gh/<user>/<repo>@main/aliases.json`），
+社区提 PR、维护者合并即发布。
+
+配置 `data/subscriptions.json`（编辑器「规则订阅」区可视化编辑）：
+
+```json
+{
+  "enabled": true,
+  "intervalMin": 30,
+  "urls": ["https://cdn.jsdelivr.net/gh/<user>/<repo>@main/aliases.json"]
+}
+```
+
+**分层合并模型**（生效结果 = 订阅层叠加在本地上）：
+
+- 合并结果 = 订阅层（URL 依序，先者优先）← 覆盖 ← 本地 `aliases.json`（最高优先级）
+- 命名（names）：本地同名键永远赢，订阅只补本地缺失的 id
+- 合并（merge）：规则按「本地声明在前、订阅在后」拼接——并查集「先声明者优先」
+  的冲突裁决天然让本地规则压过订阅，订阅补本地未覆盖的源
+- 订阅文件格式与 `aliases.json` 相同（`names` / `merge` 段，二者至少其一），
+  可另带 `meta` 字段（如 `{"version": "...", "updated": "..."}`，Go 侧忽略）
+
+**拉取策略**：启动后台刷一轮 + 按 `intervalMin` 定时刷新（另有配置 mtime 变化
+即刷）；ETag/If-None-Match 条件请求，304 短路；单文件上限 1MB；schema 校验
++ 名称净化（去控制字符、单名 ≤64 字符），坏文件拒载沿用上次缓存。
+**失败回退**：拉取失败沿用上次成功缓存（原文落盘 `data/subcache/`），再不行
+只用本地文件——订阅任何环节出问题都不影响记录主功能。停用/清空 URL 即移除
+订阅层，回到纯本地。
+**隐私**：订阅拉取会向订阅源服务器暴露本机 IP 与刷新节奏；不希望外联时
+`enabled: false` 即可完全关闭。
+
 ## HTTP API（127.0.0.1）
 
 | 端点 | 说明 |
@@ -132,6 +169,9 @@ NameText，亦可为查不到名的新 id 补名）；`v` = 敌方（按受击�
 | `GET /api/names` | 当前名字表 |
 | `GET /api/alias` | 当前生效别名配置（含并查集解析结果） |
 | `GET/POST /api/aliasfile` | 读/写 aliases.json（编辑器用） |
+| `GET /api/subs` | 订阅状态（URL 列表 + 逐条拉取状态 + 订阅层计数） |
+| `POST /api/subsfile` | 保存订阅配置 `subscriptions.json`（校验 URL 后写回，立即触发刷新） |
+| `POST /api/subs/refresh` | 手动立即刷新订阅 |
 | `POST /api/openeditor` | 系统浏览器打开规则编辑器 |
 | `POST /api/export` | SHM 原样 dump（16MB 全量映像）→ zstd 压缩落盘 `data/exports/`，扩展名 `.ashm`；`zstd -d` 可解 |
 | `POST /api/import` | 导入 `.ashm` 重放事件；产生的会话带 `src=import`；缺省从 Go 侧弹系统文件选择框，`?name=` 可程序化指定 exports 内文件；SHA-256 去重，重复导入 409 |
@@ -165,6 +205,8 @@ klauspost 解码器透明跳过、标准 `zstd` CLI 兼容（`tools/skipframe` �
 | `unit_names.json` | fetch.go 在线拉取 | CardID → 全名缓存 |
 | `names_meta.json` | fetch.go | 资源 URL 哈希（短路检查） |
 | `aliases.json` | 用户/编辑器 | 命名 + 合并配置 |
+| `subscriptions.json` | 用户/编辑器 | 规则订阅配置（enabled / intervalMin / urls） |
+| `subcache/` | subscribe.go | 订阅层产物：`sub_merged.json`（合并后订阅规则，agg 叠加用）+ 各 URL 原文缓存 + `meta.json`（ETag/状态） |
 | `exports/` | `/api/export` | SHM 原样 dump（`.ashm`，导入功能读回用） |
 | `dotcache/` | dot.go | dot 编号表（`dotcdn.json` + `_meta`）+ EnemyDot aar 原包 + 图集 PNG + 动画元数据 |
 
@@ -225,6 +267,7 @@ aggregate.go 全部聚合计算（前端零计算）
 api.go       HTTP/SSE 服务 + 名字/别名热载 + 导入导出
 alias.go     用户配置层（命名 + 双侧并查集）
 fetch.go     NameText 在线拉取（逐级短路）
+subscribe.go 规则订阅（Worker/CDN 拉取 + 分层合并 + 条件请求缓存）
 dot.go       敌方点阵解码（ALAR/ALTX/AOD）+ 编号表运行时拉取 + 渲染缓存
 dialog.go    系统文件选择框（comdlg32 GetOpenFileNameW，导入入口）
 window.go    overlay：无边框置顶 + 点击穿透 + 托盘/热键（图标取 exe 资源）
