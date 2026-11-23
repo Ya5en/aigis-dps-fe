@@ -1,0 +1,43 @@
+{
+    "FixedFileInfo": {
+        "FileVersion": {
+            "Major": 1,
+            "Minor": 1,
+            "Patch": 0,
+            "Build": 0
+        },
+        "ProductVersion": {
+            "Major": 1,
+            "Minor": 1,
+            "Patch": 0,
+            "Build": 0
+        },
+        "FileFlagsMask": "3f",
+        "FileFlags": "00",
+        "FileOS": "040004",
+        "FileType": "01",
+        "FileSubType": "00"
+    },
+    "StringFileInfo": {
+        "Comments": "千年戦争アイギス DPS 面板（SHM 只读桥 + overlay）",
+        "CompanyName": "Ya5en",
+        "FileDescription": "aigis-dps DPS 面板",
+        "FileVersion": "1.1.0",
+        "InternalName": "dpsmeter",
+        "LegalCopyright": "© 2026 Ya5en",
+        "LegalTrademarks": "aigis-dps",
+        "OriginalFilename": "dpsmeter.exe",
+        "PrivateBuild": "",
+        "ProductName": "aigis-dps",
+        "ProductVersion": "1.1.0",
+        "SpecialBuild": ""
+    },
+    "VarFileInfo": {
+        "Translation": {
+            "LangID": "0804",
+            "CharsetID": "04B0"
+        }
+    },
+    "IconPath": "assets/app.ico",
+    "ManifestPath": ""
+}

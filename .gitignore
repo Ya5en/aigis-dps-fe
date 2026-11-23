@@ -1,0 +1,16 @@
+# 构建产物与日志（不入库）
+dpsmeter.exe
+*.log
+*.ashm
+
+# 凭据（绝不入库）
+.Github_push_token
+
+# 前端
+web/node_modules/
+# dist 整目录由 vite build 重写，仅保留 go:embed 要求的占位文件
+web/dist/*
+!web/dist/index.html
+
+# 运行时数据（本机用户数据：命名配置、缓存、导出，不入库）
+data/

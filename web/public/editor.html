@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>规则编辑器 · dpsmeter</title>
+<style>
+:root { --line: #ddd; --dim: #888; --fg: #222; --warn: #b06030; }
+* { box-sizing: border-box; }
+body {
+  margin: 0; padding: 16px; background: #f4f4f4; color: var(--fg);
+  font: 13px/1.6 "Segoe UI", "Microsoft YaHei", sans-serif;
+}
+.wrap { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 12px; }
+h1 { font-size: 15px; margin: 0; }
+.card { background: #fff; border: 1px solid var(--line); border-radius: 4px; padding: 10px 14px; }
+.card h2 { font-size: 13px; margin: 0 0 6px; }
+.hint { color: var(--dim); font-size: 11px; }
+.row { display: flex; align-items: center; gap: 6px; padding: 2px 0; flex-wrap: wrap; }
+input, select, button { font: inherit; }
+input[type="text"] {
+  border: 1px solid var(--line); border-radius: 2px; padding: 2px 6px; outline: none;
+  background: #fff; color: var(--fg);
+}
+input:focus { border-color: #999; }
+input.id { width: 90px; }
+input.name { flex: 1; min-width: 160px; }
+input.srcs { flex: 1; min-width: 200px; }
+.side { width: 74px; }
+button {
+  border: 1px solid var(--line); background: #fff; color: var(--dim);
+  border-radius: 2px; padding: 2px 10px; cursor: pointer;
+}
+button:hover { color: var(--fg); border-color: #aaa; }
+button.primary { color: #fff; background: #4a7c59; border-color: #4a7c59; }
+button.primary:hover { background: #3e6b4c; }
+.del { color: var(--warn); border-color: transparent; background: none; padding: 1px 7px; }
+.del:hover { border-color: var(--warn); }
+.top { display: flex; align-items: center; gap: 10px; }
+.top .grow { flex: 1; }
+#status { font-size: 12px; }
+#status.dirty { color: var(--warn); }
+#status.ok { color: #4a7c59; }
+#status.err { color: #b03030; }
+/* 预览区 */
+.pv-inputs { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+#pvId { width: 110px; }
+#pvMeta { font-size: 12px; margin: 8px 0 0; }
+#pvBox {
+  margin-top: 8px; min-height: 80px; display: flex; align-items: flex-start;
+  justify-content: center; flex-direction: column;
+}
+#pvImg, #pvCanvas, #pvStrip {
+  image-rendering: pixelated;
+  background-image:
+    linear-gradient(45deg, #e8e8e8 25%, transparent 25%, transparent 75%, #e8e8e8 75%),
+    linear-gradient(45deg, #e8e8e8 25%, transparent 25%, transparent 75%, #e8e8e8 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 8px 8px;
+  border: 1px solid var(--line);
+}
+.hidden { display: none !important; }
+#pvMsg { color: var(--dim); font-size: 12px; padding: 20px 0; text-align: center; width: 100%; }
+#pvTick { flex: 1; min-width: 120px; }
+.spin { display: inline-block; width: 10px; height: 10px; border: 2px solid var(--line);
+  border-top-color: var(--dim); border-radius: 50%; animation: r 0.8s linear infinite; }
+@keyframes r { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="top">
+    <h1>规则编辑器</h1>
+    <span id="status">就绪</span>
+    <span class="grow"></span>
+    <button class="primary" id="saveBtn">保存</button>
+  </div>
+
+  <div class="card">
+    <h2>单位命名 <span class="hint">a = 我方（优先于 NameText），v = 敌方（按 vi 生效）</span></h2>
+    <div id="nameRows"></div>
+    <div class="row"><button id="addName">+ 添加命名</button><span class="hint" id="nameEmpty">暂无命名规则</span></div>
+  </div>
+
+  <div class="card">
+    <h2>合并规则 <span class="hint">目标 ← 源列表（逗号分隔），a=我方 / v=敌方，声明顺序 = 冲突优先级</span></h2>
+    <div id="mergeRows"></div>
+    <div class="row"><button id="addMerge">+ 添加合并</button><span class="hint" id="mergeEmpty">暂无合并规则</span></div>
+  </div>
+
+  <div class="card">
+    <h2>单位预览 <span class="hint">输入 vi（敌方 id）→ EnemyDot&lt;vi&gt;.aar，按 AOD 时间轴播放动画</span></h2>
+    <div class="pv-inputs">
+      <input type="text" id="pvId" list="dotIds" placeholder="vi，如 4755">
+      <datalist id="dotIds"></datalist>
+      <button id="pvGo">预览</button>
+      <span class="hint">编号表 <span id="idxN">…</span> 条（本地缓存）</span>
+    </div>
+    <p id="pvMeta"></p>
+    <div class="pv-inputs hidden" id="pvTools">
+      <select id="pvMode" title="显示方式">
+        <option value="anim">动画</option>
+        <option value="atlas">图集</option>
+      </select>
+      <select id="pvAct" title="动作"></select>
+      <button id="pvPlay">暂停</button>
+      <input type="range" id="pvTick" min="0" max="59" value="0" title="时间轴（暂停时可拖动检查）">
+      <select id="pvZoom" title="缩放">
+        <option value="fit">适配宽度</option>
+        <option value="1">1x</option>
+        <option value="2" selected>2x</option>
+        <option value="4">4x</option>
+      </select>
+      <button id="pvName">命名此单位</button>
+    </div>
+    <div id="pvBox">
+      <canvas id="pvCanvas" class="hidden"></canvas>
+      <canvas id="pvStrip" class="hidden"></canvas>
+      <img id="pvImg" class="hidden" alt="dot 图集">
+      <p id="pvMsg">输入编号后预览</p>
+    </div>
+  </div>
+
+</div>
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const statusEl = $("status");
+let statusTimer = null;
+function setStatus(txt, cls) {
+  statusEl.textContent = txt;
+  statusEl.className = cls || "";
+  clearTimeout(statusTimer);
+}
+
+// ---------- 配置状态 ----------
+let dirty = false;
+const names = [];   // {side:'a'|'v', id:string, name:string}
+const merges = [];  // {side:'a'|'v', tgt:string, srcs:string}
+
+function markDirty() {
+  if (!dirty) { dirty = true; setStatus("未保存", "dirty"); }
+  refreshEmpty();
+}
+function refreshEmpty() {
+  $("nameEmpty").style.display = names.length ? "none" : "";
+  $("mergeEmpty").style.display = merges.length ? "none" : "";
+}
+
+// ---------- 命名行 ----------
+function nameRow(i) {
+  const r = names[i];
+  const div = document.createElement("div");
+  div.className = "row";
+  const side = document.createElement("select");
+  side.className = "side";
+  side.innerHTML = '<option value="a">a 我方</option><option value="v">v 敌方</option>';
+  side.value = r.side;
+  side.onchange = () => { r.side = side.value; markDirty(); };
+  const id = document.createElement("input");
+  id.type = "text"; id.className = "id"; id.value = r.id; id.placeholder = "id";
+  id.oninput = () => { r.id = id.value.trim(); markDirty(); };
+  const name = document.createElement("input");
+  name.type = "text"; name.className = "name"; name.value = r.name; name.placeholder = "显示名";
+  name.oninput = () => { r.name = name.value; markDirty(); };
+  const del = document.createElement("button");
+  del.className = "del"; del.textContent = "×";
+  del.title = "删除此条";
+  del.onclick = () => { names.splice(i, 1); renderNames(); markDirty(); };
+  div.append(side, id, name, del);
+  return div;
+}
+function renderNames() {
+  const box = $("nameRows");
+  box.innerHTML = "";
+  names.forEach((_, i) => box.appendChild(nameRow(i)));
+  refreshEmpty();
+}
+$("addName").onclick = () => { names.push({ side: "v", id: "", name: "" }); renderNames(); markDirty(); const rows = $("nameRows").querySelectorAll(".row"); rows[rows.length - 1].querySelector(".id").focus(); };
+
+// ---------- 合并行 ----------
+function mergeRow(i) {
+  const r = merges[i];
+  const div = document.createElement("div");
+  div.className = "row";
+  const side = document.createElement("select");
+  side.className = "side";
+  side.innerHTML = '<option value="a">a 我方</option><option value="v">v 敌方</option>';
+  side.value = r.side;
+  side.onchange = () => { r.side = side.value; markDirty(); };
+  const tgt = document.createElement("input");
+  tgt.type = "text"; tgt.className = "id"; tgt.value = r.tgt; tgt.placeholder = "目标 id";
+  tgt.title = "吸收方（合并后显示为代表）";
+  tgt.oninput = () => { r.tgt = tgt.value.trim(); markDirty(); };
+  const srcs = document.createElement("input");
+  srcs.type = "text"; srcs.className = "srcs"; srcs.value = r.srcs; srcs.placeholder = "源 id 列表，逗号分隔（可留空 = 仅同 id 自合并）";
+  srcs.oninput = () => { r.srcs = srcs.value; markDirty(); };
+  const del = document.createElement("button");
+  del.className = "del"; del.textContent = "×";
+  del.title = "删除此条";
+  del.onclick = () => { merges.splice(i, 1); renderMerges(); markDirty(); };
+  div.append(side, tgt, srcs, del);
+  return div;
+}
+function renderMerges() {
+  const box = $("mergeRows");
+  box.innerHTML = "";
+  merges.forEach((_, i) => box.appendChild(mergeRow(i)));
+  refreshEmpty();
+}
+$("addMerge").onclick = () => { merges.push({ side: "v", tgt: "", srcs: "" }); renderMerges(); markDirty(); const rows = $("mergeRows").querySelectorAll(".row"); rows[rows.length - 1].querySelector(".id").focus(); };
+
+// ---------- 载入 / 保存 ----------
+function parseIds(s) {
+  return s.split(/[,，\s]+/).map((x) => x.trim()).filter(Boolean);
+}
+async function loadCfg() {
+  setStatus("载入中", "");
+  try {
+    const cfg = await fetch("/api/aliasfile").then((r) => r.json());
+    names.length = 0; merges.length = 0;
+    const nm = cfg.names || {};
+    for (const k of Object.keys(nm)) {
+      if (!/^[av]/.test(k)) continue;
+      names.push({ side: k[0], id: k.slice(1), name: String(nm[k]) });
+    }
+    const mg = cfg.merge || {};
+    for (const k of Object.keys(mg)) {
+      let side = "a", id = k;
+      if (/^[av]/.test(k) && /^\d+$/.test(k.slice(1))) { side = k[0]; id = k.slice(1); }
+      const v = mg[k];
+      const list = Array.isArray(v) ? v.join(",") : String(v);
+      merges.push({ side, tgt: id, srcs: list });
+    }
+    renderNames(); renderMerges();
+    dirty = false;
+    setStatus("已载入", "ok");
+    setTimeout(() => { if (statusEl.textContent === "已载入") setStatus("就绪", ""); }, 1500);
+  } catch {
+    setStatus("载入失败", "err");
+  }
+}
+$("saveBtn").onclick = async () => {
+  for (const r of names) {
+    if (!/^\d+$/.test(r.id)) { setStatus("命名 id 无效", "err"); return; }
+    if (!r.name) { setStatus("命名名为空", "err"); return; }
+  }
+  for (const r of merges) {
+    if (!/^\d+$/.test(r.tgt)) { setStatus("合并目标无效", "err"); return; }
+    for (const s of parseIds(r.srcs)) {
+      if (!/^\d+$/.test(s)) { setStatus("合并源无效", "err"); return; }
+    }
+  }
+  const out = { names: {}, merge: {} };
+  for (const r of names) out.names[r.side + r.id] = r.name;
+  for (const r of merges) out.merge[r.side + r.tgt] = parseIds(r.srcs);
+  setStatus("保存中", "");
+  try {
+    const res = await fetch("/api/aliasfile", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(out, null, 2),
+    });
+    if (!res.ok) {
+      const e = await res.json().catch(() => ({}));
+      setStatus(e.err || "保存失败", "err");
+      return;
+    }
+    dirty = false;
+    setStatus("已保存", "ok");
+    setTimeout(() => { if (statusEl.textContent === "已保存") setStatus("就绪", ""); }, 1500);
+  } catch {
+    setStatus("保存失败", "err");
+  }
+};
+
+// ---------- 编号表（完整 index，localStorage 缓存） ----------
+const IDX_KEY = "dotidx.v1";
+let dotIds = [];
+function fillDatalist() {
+  $("dotIds").innerHTML = dotIds.map((n) => `<option value="${n}">`).join("");
+  $("idxN").textContent = dotIds.length;
+}
+try {
+  const c = localStorage.getItem(IDX_KEY);
+  if (c) { dotIds = JSON.parse(c); fillDatalist(); }
+} catch { /* 缓存损坏则重拉 */ }
+fetch("/api/dotindex").then((r) => r.json()).then((j) => {
+  dotIds = j.ids || [];
+  fillDatalist();
+  try { localStorage.setItem(IDX_KEY, JSON.stringify(dotIds)); } catch { /* 配额满不影响 */ }
+}).catch(() => { if (!dotIds.length) $("idxN").textContent = "载入失败"; });
+
+// ---------- 预览：动画 + 帧条 + 图集 ----------
+let curVi = 0; // 最近一次预览的 vi（「命名此单位」落到规则行用）
+let pvMeta = null;        // /api/dotmeta 结果
+let pvActName = null;     // 当前动作名
+let playing = true;
+let animTick = 0;         // 当前 tick（浮点累进）
+let lastNow = 0;
+let raf = 0;
+const animImg = new Image(); // 图集 PNG（动画与图集共用）
+animImg.decoding = "async";
+
+function pvMsg(html) {
+  stopAnim();
+  $("pvCanvas").classList.add("hidden");
+  $("pvStrip").classList.add("hidden");
+  $("pvImg").classList.add("hidden");
+  $("pvTools").classList.add("hidden");
+  $("pvMsg").classList.remove("hidden");
+  $("pvMsg").innerHTML = html;
+  pvMeta = null;
+}
+
+function stopAnim() {
+  if (raf) cancelAnimationFrame(raf);
+  raf = 0;
+}
+
+function curMotion() {
+  if (!pvMeta || !pvMeta.motions || !pvMeta.motions.length) return null;
+  return (pvMeta.motions.find((m) => m.name === pvActName) || pvMeta.motions[0]).motion;
+}
+function curGroup() {
+  const a = curMotion();
+  if (!a) return null;
+  return pvMeta.groups.find((g) => g.id === a.tex) || pvMeta.groups[0] || null;
+}
+function frameAt(a, tick) {
+  let idx = 0;
+  for (const [t, f] of a.seq) {
+    if (tick >= t) idx = f; else break;
+  }
+  return idx;
+}
+
+function buildActSel() {
+  const sel = $("pvAct");
+  sel.innerHTML = "";
+  for (const m of pvMeta.motions) {
+    const o = document.createElement("option");
+    o.value = m.name;
+    o.textContent = `${m.name} (${m.motion.total}t)`;
+    sel.appendChild(o);
+  }
+  pvActName = pvMeta.motions[0] && pvMeta.motions[0].name;
+  sel.style.display = pvMeta.motions.length ? "" : "none";
+}
+function buildTickBar() {
+  const a = curMotion();
+  const bar = $("pvTick");
+  if (!a) { bar.style.display = "none"; return; }
+  bar.style.display = "";
+  bar.max = Math.max(0, a.total - 1);
+  bar.value = 0;
+}
+
+// 动画画布：锚点对齐固定点，帧间不跳动；下方帧条横向列全部帧并标当前帧
+function drawAnim() {
+  const a = curMotion(), g = curGroup();
+  const cv = $("pvCanvas"), ctx = cv.getContext("2d");
+  if (!a || !g || !g.frames.length || !animImg.complete || !animImg.naturalWidth) return;
+  const fs = g.frames;
+  const z = Number($("pvZoom").value) || 1;
+  let extL = 0, extU = 0, extR = 0, extD = 0;
+  for (const f of fs) {
+    extL = Math.max(extL, f.ax); extU = Math.max(extU, f.ay);
+    extR = Math.max(extR, f.w - f.ax); extD = Math.max(extD, f.h - f.ay);
+  }
+  const pad = 4;
+  const lw = extL + extR + pad * 2, lh = extU + extD + pad * 2;
+  cv.width = lw * z; cv.height = lh * z;
+  ctx.imageSmoothingEnabled = false;
+  ctx.clearRect(0, 0, cv.width, cv.height);
+  const fi = Math.min(frameAt(a, Math.floor(animTick)), fs.length - 1);
+  const f = fs[fi];
+  ctx.drawImage(animImg, f.x, f.y, f.w, f.h,
+    (pad + extL - f.ax) * z, (pad + extU - f.ay) * z, f.w * z, f.h * z);
+
+  const st = $("pvStrip"), sctx = st.getContext("2d");
+  const gap = 6;
+  const totW = fs.reduce((s, x) => s + x.w, 0) + gap * (fs.length - 1) + 2;
+  const totH = Math.max(...fs.map((x) => x.h)) + 2;
+  st.width = totW; st.height = totH;
+  sctx.imageSmoothingEnabled = false;
+  sctx.clearRect(0, 0, totW, totH);
+  let cx = 1;
+  fs.forEach((fr, i) => {
+    sctx.drawImage(animImg, fr.x, fr.y, fr.w, fr.h, cx, 1, fr.w, fr.h);
+    if (i === fi) {
+      sctx.strokeStyle = "#c05050";
+      sctx.strokeRect(cx + 0.5, 0.5, fr.w - 1, fr.h - 1);
+    }
+    cx += fr.w + gap;
+  });
+}
+
+function animLoop(now) {
+  const a = curMotion();
+  if (pvMeta && a && playing && lastNow) {
+    const dt = Math.min(now - lastNow, 100); // 切后台回来不跳帧
+    animTick += (dt / 1000) * (a.fps || 60);
+    if (a.loop && a.total > 0) animTick %= a.total;
+    else animTick = Math.min(animTick, Math.max(0, a.total - 1));
+  }
+  lastNow = now;
+  drawAnim();
+  const bar = $("pvTick");
+  if (document.activeElement !== bar) bar.value = Math.floor(animTick);
+  raf = requestAnimationFrame(animLoop);
+}
+
+function applyView() {
+  const mode = $("pvMode").value;
+  const hasAnim = pvMeta && pvMeta.motions && pvMeta.motions.length && animImg.complete && animImg.naturalWidth;
+  $("pvMsg").style.display = "none";
+  if (mode === "anim" && hasAnim) {
+    stopAnim();
+    $("pvImg").classList.add("hidden");
+    $("pvCanvas").classList.remove("hidden");
+    $("pvStrip").classList.remove("hidden");
+    animTick = 0; lastNow = 0;
+    playing = true;
+    $("pvPlay").textContent = "暂停";
+    raf = requestAnimationFrame(animLoop);
+  } else {
+    stopAnim();
+    $("pvCanvas").classList.add("hidden");
+    $("pvStrip").classList.add("hidden");
+    $("pvImg").classList.remove("hidden");
+    applyZoom();
+  }
+}
+
+function applyZoom() {
+  const img = $("pvImg");
+  const z = $("pvZoom").value;
+  img.style.width = "";
+  img.style.maxWidth = "";
+  if (z === "fit") { img.style.maxWidth = "100%"; }
+  else {
+    const nw = img.naturalWidth;
+    if (nw) { img.style.width = Math.min(nw * Number(z), 10000) + "px"; img.style.maxWidth = "none"; }
+  }
+}
+
+async function preview(viRaw) {
+  const vi = String(viRaw || $("pvId").value).trim();
+  if (!/^\d+$/.test(vi)) { pvMsg("请输入数字 id"); return; }
+  pvMsg('<span class="spin"></span> 解析中');
+  let j;
+  try {
+    j = await fetch("/api/vdot?v=" + vi).then((r) => r.json());
+  } catch { pvMsg("桥不可达"); return; }
+  if (!j.found) { pvMsg("未找到：编号不在点阵索引中"); return; }
+  curVi = Number(vi);
+  $("pvMeta").textContent = `vi ${vi} → EnemyDot${String(j.dot).padStart(4, "0")}`;
+  $("pvMsg").classList.add("hidden");
+  $("pvTools").classList.remove("hidden");
+  // 图集与元数据并行取
+  const atlasP = new Promise((res) => {
+    animImg.onload = () => res(true);
+    animImg.onerror = () => res(false);
+    animImg.src = "/api/dot.png?d=" + j.dot + "&t=" + Date.now();
+  });
+  $("pvImg").src = animImg.src;
+  let meta = null;
+  try { meta = await fetch("/api/dotmeta?d=" + j.dot).then((r) => r.json()); } catch { /* 无动画则仅图集 */ }
+  const ok = await atlasP;
+  if (!ok) { pvMsg("图集渲染失败"); return; }
+  pvMeta = meta && meta.groups && meta.groups.length && meta.motions && meta.motions.length ? meta : null;
+  if (pvMeta) {
+    buildActSel(); buildTickBar();
+    $("pvMode").style.display = "";
+    $("pvAct").style.display = "";
+    $("pvPlay").style.display = "";
+    $("pvTick").style.display = "";
+  } else {
+    $("pvMode").style.display = "none";
+    $("pvAct").style.display = "none";
+    $("pvPlay").style.display = "none";
+    $("pvTick").style.display = "none";
+  }
+  $("pvMode").value = pvMeta ? "anim" : "atlas";
+  applyView();
+  applyZoom();
+}
+
+$("pvZoom").onchange = () => { if (pvMeta && $("pvMode").value === "atlas") applyZoom(); };
+$("pvImg").onload = applyZoom;
+$("pvMode").onchange = applyView;
+$("pvAct").onchange = () => { pvActName = $("pvAct").value; buildTickBar(); animTick = 0; drawAnim(); };
+$("pvPlay").onclick = () => {
+  playing = !playing;
+  $("pvPlay").textContent = playing ? "暂停" : "播放";
+  if (playing) lastNow = 0;
+};
+$("pvTick").oninput = () => {
+  playing = false;
+  $("pvPlay").textContent = "播放";
+  animTick = Number($("pvTick").value);
+  lastNow = 0;
+  drawAnim();
+};
+$("pvGo").onclick = () => preview();
+$("pvId").addEventListener("keydown", (e) => { if (e.key === "Enter") preview(); });
+
+// 预览 → 直接落到规则行
+$("pvName").onclick = () => {
+  names.push({ side: "v", id: String(curVi), name: "" });
+  renderNames(); markDirty();
+  const rows = $("nameRows").querySelectorAll(".row");
+  rows[rows.length - 1].querySelector(".name").focus();
+};
+
+loadCfg();
+</script>
+</body>
+</html>
