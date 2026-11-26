@@ -25,7 +25,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -123,7 +122,7 @@ func (m *subManager) loadConfig() {
 	b, err := os.ReadFile(m.cfgPath)
 	if err == nil {
 		if err := json.Unmarshal(b, &m.cfg); err != nil {
-			log.Printf("[!] 订阅配置解析失败（停用订阅）: %v", err)
+			logWarn("订阅配置解析失败（停用订阅）: %v", err)
 			m.cfg = subConfig{}
 		}
 	}
@@ -136,7 +135,7 @@ func (m *subManager) loadConfig() {
 		u = strings.TrimSpace(u)
 		pu, err := url.Parse(u)
 		if err != nil || (pu.Scheme != "http" && pu.Scheme != "https") || pu.Host == "" {
-			log.Printf("[!] 订阅 URL 非法（忽略）: %q", u)
+			logWarn("订阅 URL 非法（忽略）: %q", u)
 			continue
 		}
 		urls = append(urls, u)
@@ -202,7 +201,7 @@ func (m *subManager) status() subStatus {
 // refreshNow 外部（API/循环）触发的刷新入口。
 func (m *subManager) refreshNow() {
 	if err := m.refresh(); err != nil {
-		log.Printf("[!] 订阅刷新失败: %v", err)
+		logWarn("订阅刷新失败: %v", err)
 	}
 }
 
@@ -217,7 +216,7 @@ func (m *subManager) refresh() error {
 		// 停用/清空 → 撤掉合并产物，agg 下次重载自动回到纯本地
 		if _, err := os.Stat(m.mergedPath()); err == nil {
 			_ = os.Remove(m.mergedPath())
-			log.Printf("[*] 订阅已停用，移除合并产物（%s）", m.mergedPath())
+			logInfo("订阅已停用，移除合并产物（%s）", m.mergedPath())
 			m.saveMeta()
 			if m.onChange != nil {
 				m.onChange()
@@ -299,14 +298,14 @@ func (m *subManager) fetchOne(u string) (changed bool) {
 	m.meta.Entries[u], m.meta.Merges[u] = nN, nM
 	// 原文缓存（固定名覆盖写）：合并阶段从这里重读，离线可用
 	_ = os.WriteFile(m.rawPath(u), b, 0o644)
-	log.Printf("[*] 订阅已更新：%s（命名 %d / 合并 %d）", u, nN, nM)
+	logInfo("订阅已更新：%s（命名 %d / 合并 %d）", u, nN, nM)
 	return true
 }
 
 func (m *subManager) setErr(u, msg string) {
 	m.meta.Statuses[u] = "error"
 	m.meta.Errs[u] = msg
-	log.Printf("[!] 订阅拉取失败 %s: %s（沿用缓存）", u, msg)
+	logWarn("订阅拉取失败 %s: %s（沿用缓存）", u, msg)
 }
 
 // writeMerged 按 URL 顺序合并订阅层并落盘。命名：先者优先；合并规则：按序拼接。

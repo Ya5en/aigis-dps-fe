@@ -22,7 +22,6 @@ import (
 	"image"
 	"image/png"
 	"io"
-	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -50,7 +49,7 @@ func newDotStore(cacheDir string) *dotStore {
 	// 缓存目录在启动时就建好：编号表/meta/aar/png 都写这里，
 	// 首次运行（data/dotcache 尚不存在）也不能让写盘失败。
 	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
-		log.Printf("[!] 创建 dot 缓存目录失败: %v", err)
+		logWarn("创建 dot 缓存目录失败: %v", err)
 	}
 	d := &dotStore{
 		cdn:      map[string][2]string{},
@@ -74,13 +73,13 @@ func (d *dotStore) loadCdnCache() {
 	}
 	var cd map[string][2]string
 	if err := json.Unmarshal(b, &cd); err != nil || len(cd) == 0 {
-		log.Printf("[!] dotcdn 缓存损坏（%s）: %v，等待在线刷新", d.cdnCachePath(), err)
+		logWarn("dotcdn 缓存损坏（%s）: %v，等待在线刷新", d.cdnCachePath(), err)
 		return
 	}
 	d.mu.Lock()
 	d.cdn = cd
 	d.mu.Unlock()
-	log.Printf("[*] dot 编号表已从缓存装载：%d 条", len(cd))
+	logInfo("dot 编号表已从缓存装载：%d 条", len(cd))
 }
 
 // refresh 从 Worker 拉最新 index 抽取 EnemyDot 编号表（fetchAndCacheNames 同构）。
@@ -91,14 +90,14 @@ func (d *dotStore) refresh() {
 	// 1. Workers API 取 index 地址
 	v, err := httpGet(workerURL)
 	if err != nil {
-		log.Printf("[!] dot 编号表在线刷新失败（沿用缓存）: %v", err)
+		logWarn("dot 编号表在线刷新失败（沿用缓存）: %v", err)
 		return
 	}
 	var loc struct {
 		Value string `json:"value"`
 	}
 	if err := json.Unmarshal(v, &loc); err != nil || loc.Value == "" {
-		log.Printf("[!] dot 编号表：Worker /url 响应无效（沿用缓存）: %v", err)
+		logWarn("dot 编号表：Worker /url 响应无效（沿用缓存）: %v", err)
 		return
 	}
 	ih := urlHash(loc.Value)
@@ -111,14 +110,14 @@ func (d *dotStore) refresh() {
 		_ = json.Unmarshal(mb, &meta)
 	}
 	if meta.IndexHash == ih && len(d.cdn) > 0 {
-		log.Println("[*] dot 编号表：索引 URL 未变化，跳过（使用缓存）")
+		logInfo("dot 编号表：索引 URL 未变化，跳过（使用缓存）")
 		return
 	}
 
 	// 3. 下载 index（XOR 0xDA 解密）
 	idx, err := httpGet(loc.Value)
 	if err != nil {
-		log.Printf("[!] dot 编号表：索引下载失败（沿用缓存）: %v", err)
+		logWarn("dot 编号表：索引下载失败（沿用缓存）: %v", err)
 		return
 	}
 	for i := range idx {
@@ -149,18 +148,18 @@ func (d *dotStore) refresh() {
 		cd[strconv.FormatInt(parseInt64(num), 10)] = [2]string{parts[0], parts[1]}
 	}
 	if len(cd) == 0 {
-		log.Printf("[!] dot 编号表：index 中未抽到任何 EnemyDot 条目（沿用缓存）")
+		logWarn("dot 编号表：index 中未抽到任何 EnemyDot 条目（沿用缓存）")
 		return
 	}
 
 	// 5. 落盘 + 记 meta + 热替换内存表
 	j, err := json.Marshal(cd)
 	if err != nil {
-		log.Printf("[!] dot 编号表序列化失败: %v", err)
+		logWarn("dot 编号表序列化失败: %v", err)
 		return
 	}
 	if err := os.WriteFile(d.cdnCachePath(), j, 0o644); err != nil {
-		log.Printf("[!] dot 编号表缓存写入失败: %v", err)
+		logWarn("dot 编号表缓存写入失败: %v", err)
 		return
 	}
 	mb, _ := json.Marshal(struct {
@@ -172,7 +171,7 @@ func (d *dotStore) refresh() {
 	d.cdn = cd
 	n := len(cd)
 	d.mu.Unlock()
-	log.Printf("[*] dot 编号表已在线更新：%d 条 → %s", n, d.cdnCachePath())
+	logInfo("dot 编号表已在线更新：%d 条 → %s", n, d.cdnCachePath())
 }
 
 // parseInt64 十进制字符串 → int64（调用方已保证纯数字）。
@@ -338,7 +337,7 @@ func (d *dotStore) loadAAR(dot int64) ([]byte, error) {
 	}
 	_ = os.MkdirAll(d.cacheDir, 0o755)
 	if err := os.WriteFile(cacheAar, b, 0o644); err != nil {
-		log.Printf("[!] aar 缓存写入失败: %v", err)
+		logWarn("aar 缓存写入失败: %v", err)
 	}
 	return b, nil
 }
@@ -397,7 +396,7 @@ func (d *dotStore) renderPNG(dot int64) ([]byte, error) {
 	}
 	_ = os.MkdirAll(d.cacheDir, 0o755)
 	if err := os.WriteFile(cachePng, buf.Bytes(), 0o644); err != nil {
-		log.Printf("[!] png 缓存写入失败: %v", err)
+		logWarn("png 缓存写入失败: %v", err)
 	}
 	return buf.Bytes(), nil
 }
@@ -537,7 +536,7 @@ func (d *dotStore) meta(dot int64) (*dotMeta, error) {
 	b, _ := json.Marshal(m)
 	_ = os.MkdirAll(d.cacheDir, 0o755)
 	if err := os.WriteFile(cacheMeta, b, 0o644); err != nil {
-		log.Printf("[!] meta 缓存写入失败: %v", err)
+		logWarn("meta 缓存写入失败: %v", err)
 	}
 	return m, nil
 }

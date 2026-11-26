@@ -6,7 +6,6 @@ package main
 import (
 	"embed"
 	"io/fs"
-	"log"
 	"net/http"
 )
 
@@ -16,7 +15,7 @@ var distFS embed.FS
 func mustWebFS() http.FileSystem {
 	sub, err := fs.Sub(distFS, "web/dist")
 	if err != nil {
-		log.Fatalf("[!] embed web/dist 失败: %v", err)
+		logFatal("embed web/dist 失败: %v", err)
 	}
 	return http.FS(sub)
 }

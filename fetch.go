@@ -16,7 +16,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -91,28 +90,28 @@ func fetchAndCacheNames(namesPath string) {
 	// 1. Workers API 取资源地址（轻量，每次必做）
 	v, err := httpGet(workerURL)
 	if err != nil {
-		log.Printf("[!] 在线拉取名字表失败（沿用缓存 %s）: %v", namesPath, err)
+		logWarn("在线拉取名字表失败（沿用缓存 %s）: %v", namesPath, err)
 		return
 	}
 	var loc struct {
 		Value string `json:"value"`
 	}
 	if err := json.Unmarshal(v, &loc); err != nil || loc.Value == "" {
-		log.Printf("[!] Worker /url 响应无效（沿用缓存）: %v", err)
+		logWarn("Worker /url 响应无效（沿用缓存）: %v", err)
 		return
 	}
 	ih := urlHash(loc.Value)
 
 	meta := loadNamesMeta(namesPath)
 	if !fullFetch && ih == meta.IndexHash {
-		log.Println("[*] 名字表：索引 URL 未变化，跳过下载（使用缓存）")
+		logInfo("名字表：索引 URL 未变化，跳过下载（使用缓存）")
 		return
 	}
 
 	// 2. 下载 index（XOR 0xDA 解密）
 	idx, err := httpGet(loc.Value)
 	if err != nil {
-		log.Printf("[!] 索引下载失败（沿用缓存）: %v", err)
+		logWarn("索引下载失败（沿用缓存）: %v", err)
 		return
 	}
 	for i := range idx {
@@ -132,42 +131,42 @@ func fetchAndCacheNames(namesPath string) {
 		}
 	}
 	if atbURL == "" {
-		log.Printf("[!] index.txt 中未找到 NameText.atb 条目（沿用缓存）")
+		logWarn("index.txt 中未找到 NameText.atb 条目（沿用缓存）")
 		return
 	}
 	ah := urlHash(atbURL)
 	if !fullFetch && ah == meta.AtbHash {
 		saveNamesMeta(namesPath, namesMeta{IndexHash: ih, AtbHash: ah})
-		log.Println("[*] 名字表：atb URL 未变化，跳过下载（使用缓存）")
+		logInfo("名字表：atb URL 未变化，跳过下载（使用缓存）")
 		return
 	}
 
 	// 4. 下载 atb（跳过前 12 字节自定义头，剩余为 LZ4 frame）
 	atb, err := httpGet(atbURL)
 	if err != nil {
-		log.Printf("[!] NameText.atb 下载失败（沿用缓存）: %v", err)
+		logWarn("NameText.atb 下载失败（沿用缓存）: %v", err)
 		return
 	}
 	if len(atb) <= 12 {
-		log.Printf("[!] NameText.atb 内容过短（%d B），沿用缓存", len(atb))
+		logWarn("NameText.atb 内容过短（%d B），沿用缓存", len(atb))
 		return
 	}
 	names, n, err := parseNameText(atb[12:])
 	if err != nil {
-		log.Printf("[!] 名字表解析失败（沿用缓存）: %v", err)
+		logWarn("名字表解析失败（沿用缓存）: %v", err)
 		return
 	}
 	j, err := json.Marshal(names)
 	if err != nil {
-		log.Printf("[!] 名字表序列化失败: %v", err)
+		logWarn("名字表序列化失败: %v", err)
 		return
 	}
 	if err := os.WriteFile(namesPath, j, 0o644); err != nil {
-		log.Printf("[!] 名字表缓存写入失败: %v", err)
+		logWarn("名字表缓存写入失败: %v", err)
 		return
 	}
 	saveNamesMeta(namesPath, namesMeta{IndexHash: ih, AtbHash: ah})
-	log.Printf("[*] 名字表已在线更新：%d 条 → %s", n, namesPath)
+	logInfo("名字表已在线更新：%d 条 → %s", n, namesPath)
 }
 
 // parseNameText 解析 NameText.atb（ALTB/gdtx + ALRD 结构）。

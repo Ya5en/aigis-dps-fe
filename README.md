@@ -57,6 +57,8 @@ dot.go    敌方点阵预览（EnemyDot.aar → ALTX 图集 PNG + AOD 动画元�
 | `-headless` | 关 | 仅启动本地服务不开窗，浏览器访问面板 |
 | `-size` | `520x420` | overlay 初始尺寸 WxH |
 | `-version` | 关 | 打印版本号后退出（`dpsmeter X.Y.Z`，值与 `VERSION` 同源） |
+| `-log-level` | `warning` | 日志级别：`info` / `warning` / `error`；默认只输出警告与错误 |
+| `-v` | 关 | 显示 INFO 日志（等价 `-log-level info`） |
 
 **操作**：默认点击穿透（不挡游戏）；托盘菜单或 `Ctrl+Alt+L` 切换穿透；
 `Ctrl+Alt+H` / 托盘 / 双击托盘图标切换显隐；解锁后拖页面顶部拖条移动窗口；
@@ -210,9 +212,17 @@ klauspost 解码器透明跳过、标准 `zstd` CLI 兼容（`tools/skipframe` �
 | `exports/` | `/api/export` | SHM 原样 dump（`.ashm`，导入功能读回用） |
 | `dotcache/` | dot.go | dot 编号表（`dotcdn.json` + `_meta`）+ EnemyDot aar 原包 + 图集 PNG + 动画元数据 |
 
-日志：`dpsmeter.log`（exe 同级，追加）+ stderr。启动接入、名字表更新、配置热载、
-CDN 拉取失败、导入文件选择（选择/取消/失败）等均有记录；HTTP 请求行排除 SSE
-长连接防刷屏。
+日志：`dpsmeter.log`（exe 同级，追加）+ stderr。三级标签：
+
+| 级别 | 含义 | 例子 |
+|---|---|---|
+| `[INFO]` | 正常里程碑 | 启动、名字表/编号表在线更新、配置热载、导入导出、HTTP 请求行（不含 SSE） |
+| `[WARN]` | 降级但可用 | 沿用缓存、配置条目非法被忽略、缓存写盘失败、订阅拉取失败 |
+| `[ERROR]` | 功能不可用 / 进程退出 | HTTP 服务起不来、数据目录建不了、WebView2 初始化失败 |
+
+**默认只输出 `[WARN]` 与 `[ERROR]`**——一切正常时日志文件可以一直是空的，
+这是特性不是故障。排查问题加 `-log-level info`（或 `-v`）即可看到 INFO 明细；
+`-log-level error` 则进一步安静到只剩错误。
 
 ## 版本号约定
 
@@ -224,7 +234,7 @@ CDN 拉取失败、导入文件选择（选择/取消/失败）等均有记录�
 | exe 属性 FileVersion / ProductVersion | `tools/genver` 写入 `versioninfo.json` | 四段 `X.Y.Z.0`（Build 恒 0） |
 | StringFileInfo 的 FileVersion / ProductVersion 字符串 | 同上 | 完整语义化版本（含 `-rc.1` 之类后缀） |
 | `dpsmeter.exe -version` 输出 | `build.bat` 的 `-X main.version` | `dpsmeter X.Y.Z` |
-| 启动日志 | 同上 | `[*] dpsmeter vX.Y.Z 启动…` |
+| 启动日志（`-log-level info`） | 同上 | `[INFO] dpsmeter vX.Y.Z 启动…` |
 
 **格式**：`MAJOR.MINOR.PATCH`，可选预发布后缀 `-rc.1` / `-beta.2`（预发布仅供
 自测，不打正式 tag）。
@@ -246,7 +256,7 @@ CDN 拉取失败、导入文件选择（选择/取消/失败）等均有记录�
    1.0.1→1.0.2→1.0.3）
 4. **无感不升版**：内部工具/内部文档/注释等不影响交付面的更新不占版本位，由
    git 历史记录；拿不准时按「可感知」处理
-5. **产物自证**：`-version`、启动日志、exe 属性三处必须与 `VERSION` 逐字一致，
+5. **产物自证**：`-version`、exe 属性（以及 `-log-level info` 时的启动日志行）必须与 `VERSION` 逐字一致，
    否则产物作废重构建
 6. **派生不得手改**：只改 `VERSION`，`versioninfo.json` / `.syso` 由 `build.bat`
    重新生成

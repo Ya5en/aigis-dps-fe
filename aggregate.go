@@ -5,7 +5,6 @@ package main
 
 import (
 	"fmt"
-	"log"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -491,7 +490,7 @@ func (a *agg) reloadAliases() {
 	a.alias = an
 	nMerge := len(a.uf.reps) + len(a.ufV.reps)
 	if nNames > 0 || nMerge > 0 || nSub > 0 {
-		log.Printf("[*] 别名配置已载入：我方名 %d / 敌方名 %d / 合并 %d 组（我方 %d + 敌方 %d） / 订阅补入 %d 条",
+		logInfo("别名配置已载入：我方名 %d / 敌方名 %d / 合并 %d 组（我方 %d + 敌方 %d） / 订阅补入 %d 条",
 			len(an.Ally), len(an.Enemy), nMerge, len(a.uf.reps), len(a.ufV.reps), nSub)
 	}
 }

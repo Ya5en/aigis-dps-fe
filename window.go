@@ -5,7 +5,6 @@
 package main
 
 import (
-	"log"
 	"runtime"
 	"sync/atomic"
 	"syscall"
@@ -189,7 +188,7 @@ func loadAppIcon(hinstance uintptr, cx, cy int) uintptr {
 	}
 	h, _, _ = procLoadIcon.Call(0, iconApplication) // 回退：无 .syso 构建 / 资源异常时
 	if h == 0 {
-		log.Println("[!] 图标加载失败（资源缺失且回退 IDI_APPLICATION 失败）")
+		logWarn("图标加载失败（资源缺失且回退 IDI_APPLICATION 失败）")
 	}
 	return h
 }
@@ -209,7 +208,7 @@ func runOverlay(addr string, width, height int) {
 		},
 	})
 	if w == nil {
-		log.Println("[!] WebView2 初始化失败（运行时未安装？）——可用 -headless + 浏览器访问面板")
+		logError("WebView2 初始化失败（运行时未安装？）——可用 -headless + 浏览器访问面板")
 		return
 	}
 	defer w.Destroy()
@@ -240,9 +239,9 @@ func runOverlay(addr string, width, height int) {
 
 	go trayLoop()
 	go keepTopmost()
-	log.Printf("[*] overlay 已打开（无边框置顶；Ctrl+Alt+H 显隐，托盘菜单退出）")
+	logInfo("overlay 已打开（无边框置顶；Ctrl+Alt+H 显隐，托盘菜单退出）")
 	w.Run()
-	log.Println("[*] overlay 已关闭，退出")
+	logInfo("overlay 已关闭，退出")
 }
 
 func applyBorderless() {
@@ -333,7 +332,7 @@ func trayLoop() {
 	if _, _, er := procRegClass.Call(uintptr(unsafe.Pointer(&wc))); er.(syscall.Errno) != 0 {
 		// ERROR_CLASS_ALREADY_EXISTS(1410) 时忽略（重开窗口场景）
 		if er != syscall.Errno(1410) {
-			log.Printf("[!] 托盘窗口类注册失败: %v", er)
+			logWarn("托盘窗口类注册失败: %v", er)
 		}
 	}
 
@@ -341,7 +340,7 @@ func trayLoop() {
 		0, 0, 0, 0, 0, 0, 0, hinstance, 0)
 	hwndCtl = hwnd
 	if hwnd == 0 {
-		log.Println("[!] 托盘控制窗口创建失败")
+		logWarn("托盘控制窗口创建失败")
 		return
 	}
 
@@ -360,11 +359,11 @@ func trayLoop() {
 	trayNid = nid
 	r, _, _ := procShellNotify.Call(nimAdd, uintptr(unsafe.Pointer(&trayNid)))
 	if r == 0 {
-		log.Printf("[!] 托盘图标添加失败（Shell_NotifyIconW NIM_ADD）")
+		logWarn("托盘图标添加失败（Shell_NotifyIconW NIM_ADD）")
 		return
 	}
 	trayAdded.Store(true)
-	log.Println("[*] 托盘图标已添加")
+	logInfo("托盘图标已添加")
 
 	procRegHotKey.Call(hwnd, hkToggleShow, uintptr(modControl|modAlt), 0x48) // Ctrl+Alt+H 显隐
 

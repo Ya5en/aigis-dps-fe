@@ -30,7 +30,6 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	"log"
 	"os"
 	"strconv"
 )
@@ -55,18 +54,18 @@ func parseAliasNames(raw json.RawMessage) (aliasNames, int) {
 	}
 	var rawMap map[string]string
 	if err := json.Unmarshal(raw, &rawMap); err != nil {
-		log.Printf("[!] names 段解析失败（忽略）: %v", err)
+		logWarn("names 段解析失败（忽略）: %v", err)
 		return an, 0
 	}
 	n := 0
 	for key, name := range rawMap {
 		if len(key) < 2 || name == "" {
-			log.Printf("[!] names[%s] 格式非法（忽略，key 须为 a/v + 数字，值须非空）", key)
+			logWarn("names[%s] 格式非法（忽略，key 须为 a/v + 数字，值须非空）", key)
 			continue
 		}
 		id, err := strconv.ParseUint(key[1:], 10, 32)
 		if err != nil {
-			log.Printf("[!] names[%s] id 非法（忽略）", key)
+			logWarn("names[%s] id 非法（忽略）", key)
 			continue
 		}
 		ids := strconv.FormatUint(id, 10) // 规范化（去前导零）
@@ -76,7 +75,7 @@ func parseAliasNames(raw json.RawMessage) (aliasNames, int) {
 		case 'v':
 			an.Enemy[ids] = name
 		default:
-			log.Printf("[!] names[%s] 前缀非法（忽略，仅支持 a/v）", key)
+			logWarn("names[%s] 前缀非法（忽略，仅支持 a/v）", key)
 			continue
 		}
 		n++
@@ -114,7 +113,7 @@ func parseMergeOrdered(raw json.RawMessage) []mergeRule {
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	tok, err := dec.Token()
 	if err != nil || tok != json.Delim('{') {
-		log.Printf("[!] merge 段须为对象（忽略）")
+		logWarn("merge 段须为对象（忽略）")
 		return nil
 	}
 	var rules []mergeRule
@@ -185,7 +184,7 @@ func splitMergeSides(raw json.RawMessage) (ally, enemy []mergeRule) {
 	for _, rule := range parseMergeOrdered(raw) {
 		id, isV, ok := parseMergeKey(rule.Key)
 		if !ok {
-			log.Printf("[!] merge 目标 %q 非法（忽略，须为 a/v + 数字或纯数字）", rule.Key)
+			logWarn("merge 目标 %q 非法（忽略，须为 a/v + 数字或纯数字）", rule.Key)
 			continue
 		}
 		r := mergeRule{Key: strconv.FormatUint(uint64(id), 10), Val: rule.Val}
@@ -207,13 +206,13 @@ func newUnionFindFromRules(rules []mergeRule, enemy bool) unionFind {
 		tgts[uint32(tid)] = true
 		srcs, ok := parseMergeTarget(rule.Val)
 		if !ok {
-			log.Printf("[!] merge[%s] 值须为源 id 数组或单源字符串（忽略该条）", rule.Key)
+			logWarn("merge[%s] 值须为源 id 数组或单源字符串（忽略该条）", rule.Key)
 			continue
 		}
 		for _, s := range srcs {
 			sid, ok := parseMergeSrc(s, enemy)
 			if !ok {
-				log.Printf("[!] merge[%s] 源 %q 非法（忽略）", rule.Key, s)
+				logWarn("merge[%s] 源 %q 非法（忽略）", rule.Key, s)
 				continue
 			}
 			u.addEdge(sid, uint32(tid), rule.Key)
@@ -270,11 +269,11 @@ func (u unionFind) addEdge(s, t uint32, ruleKey string) {
 		return // 自边无意义（目标自身实例本就归入合一行）
 	}
 	if _, dup := u.parent[s]; dup {
-		log.Printf("[!] merge[%s] 源 %d 已被先前规则合并，本条忽略（声明顺序优先）", ruleKey, s)
+		logWarn("merge[%s] 源 %d 已被先前规则合并，本条忽略（声明顺序优先）", ruleKey, s)
 		return
 	}
 	if u.reaches(t, s) {
-		log.Printf("[!] merge[%s] 会形成循环吸收（%d ⇄ %d 链），丢弃该边", ruleKey, s, t)
+		logWarn("merge[%s] 会形成循环吸收（%d ⇄ %d 链），丢弃该边", ruleKey, s, t)
 		return
 	}
 	u.parent[s] = t
@@ -319,7 +318,7 @@ func loadAlias(path string) (aliasConfig, aliasNames, int) {
 	cfg, err := readAliasFile(path)
 	if err != nil {
 		if !os.IsNotExist(err) {
-			log.Printf("[!] 别名配置解析失败（沿用旧配置）: %v", err)
+			logWarn("别名配置解析失败（沿用旧配置）: %v", err)
 		}
 		return cfg, emptyAliasNames(), 0
 	}

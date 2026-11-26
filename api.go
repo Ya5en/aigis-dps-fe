@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -196,7 +195,7 @@ func (s *server) routes() http.Handler {
 			epoch, _, _ = rd.meta()
 		}
 		s.agg.reset(epoch)
-		log.Printf("[*] 统计已重置（epoch=%d）", epoch)
+		logInfo("统计已重置（epoch=%d）", epoch)
 		writeJSON(w, 200, map[string]any{"ok": true})
 	})
 
@@ -248,7 +247,7 @@ func (s *server) routes() http.Handler {
 			writeJSON(w, 500, map[string]string{"err": "写入失败: " + err.Error()})
 			return
 		}
-		log.Printf("[*] 别名配置已由编辑器保存（%s）", s.aliasPath)
+		logInfo("别名配置已由编辑器保存（%s）", s.aliasPath)
 		writeJSON(w, 200, map[string]any{"ok": true})
 	})
 
@@ -286,7 +285,7 @@ func (s *server) routes() http.Handler {
 			writeJSON(w, 500, map[string]string{"err": "写入失败: " + err.Error()})
 			return
 		}
-		log.Printf("[*] 订阅配置已保存（%d 个 URL，启用=%v）", len(cfg.Urls), cfg.Enabled)
+		logInfo("订阅配置已保存（%d 个 URL，启用=%v）", len(cfg.Urls), cfg.Enabled)
 		go s.subs.refreshNow() // 立即刷一轮；agg 经 sub_merged.json mtime 自动重载
 		writeJSON(w, 200, map[string]any{"ok": true})
 	})
@@ -348,7 +347,7 @@ func (s *server) routes() http.Handler {
 			writeJSON(w, 500, map[string]string{"err": "压缩写入失败"})
 			return
 		}
-		log.Printf("[*] SHM 已导出：%s（epoch=%d seq=%d oldest=%d，%s）", p, epoch, seqTotal, oldest, humanSize(st.Size()))
+		logInfo("SHM 已导出：%s（epoch=%d seq=%d oldest=%d，%s）", p, epoch, seqTotal, oldest, humanSize(st.Size()))
 		_ = exec.Command("rundll32", "url.dll,FileProtocolHandler", dir).Start() // 资源管理器定位导出目录
 		writeJSON(w, 200, map[string]any{
 			"ok": true, "path": p, "bytes": st.Size(),
@@ -382,16 +381,16 @@ func (s *server) routes() http.Handler {
 				"aigis-dps 战斗数据", "*.ashm", "所有文件", "*.*")
 			s.picking.Store(false)
 			if err != nil {
-				log.Printf("[!] 文件选择框失败: %v", err)
+				logWarn("文件选择框失败: %v", err)
 				writeJSON(w, 500, map[string]string{"err": err.Error()})
 				return
 			}
 			if sel == "" { // 用户取消：不是错误，前端静默
-				log.Printf("[*] 导入已取消（用户关闭文件选择框）")
+				logInfo("导入已取消（用户关闭文件选择框）")
 				writeJSON(w, 200, map[string]any{"ok": false, "canceled": true})
 				return
 			}
-			log.Printf("[*] 导入文件选择: %s", sel)
+			logInfo("导入文件选择: %s", sel)
 			p = sel
 		}
 
@@ -443,7 +442,7 @@ func (s *server) routes() http.Handler {
 			}
 			n += c
 		}
-		log.Printf("[*] 已导入 %s（批次 %d，epoch=%d seq=%d→%d：%d 条事件，%d 场）", filepath.Base(p), is.batch, epoch, oldest, seqTotal, n, is.idx)
+		logInfo("已导入 %s（批次 %d，epoch=%d seq=%d→%d：%d 条事件，%d 场）", filepath.Base(p), is.batch, epoch, oldest, seqTotal, n, is.idx)
 		writeJSON(w, 200, map[string]any{
 			"ok": true, "file": filepath.Base(p), "events": n, "battles": is.idx,
 			"batch": is.batch, "epoch": epoch, "seqTotal": seqTotal, "oldest": oldest,
@@ -452,7 +451,7 @@ func (s *server) routes() http.Handler {
 
 	// 退出程序：有窗体走 WM_CLOSE 优雅关闭（托盘清理等 defer 生效），无窗体直接退出
 	mux.HandleFunc("POST /api/exit", func(w http.ResponseWriter, r *http.Request) {
-		log.Printf("[*] 收到退出请求")
+		logInfo("收到退出请求")
 		writeJSON(w, 200, map[string]any{"ok": true})
 		go func() {
 			time.Sleep(150 * time.Millisecond) // 让响应先落到客户端
@@ -513,7 +512,7 @@ func (s *server) routes() http.Handler {
 func logRequest(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/events" { // SSE 长连接不刷日志
-			log.Printf("%s %s", r.Method, r.URL.Path)
+			logInfo("%s %s", r.Method, r.URL.Path)
 		}
 		next.ServeHTTP(w, r)
 	})
@@ -572,11 +571,11 @@ func (s *server) readerLoop(pollMs int) {
 			r.startReplay(total)
 			s.replaying.Store(true)
 			s.replayLeft.Store(total - oldest)
-			log.Printf("[*] 已接入 %s（epoch=%d），回放存量 %d 条（seq %d→%d）重建战斗记录",
+			logInfo("已接入 %s（epoch=%d），回放存量 %d 条（seq %d→%d）重建战斗记录",
 				shmName, r.lastEpoch, total-oldest, oldest, total)
 		} else {
 			r.skipBacklog()
-			log.Printf("[*] 已接入 %s（epoch=%d），无存量可回放，从 seq=%d 起统计",
+			logInfo("已接入 %s（epoch=%d），无存量可回放，从 seq=%d 起统计",
 				shmName, r.lastEpoch, total)
 		}
 		s.agg.OnSessionStart(r.lastEpoch)
@@ -589,7 +588,7 @@ func (s *server) readerLoop(pollMs int) {
 				s.replaying.Store(true)
 				s.replayLeft.Store(r.replayTarget - r.exp)
 			} else if s.replaying.Swap(false) {
-				log.Printf("[*] 历史回放结束")
+				logInfo("历史回放结束")
 			}
 			_, total, _ := r.meta()
 			if total != s.lastSeq.Load() {

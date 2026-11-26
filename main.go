@@ -56,15 +56,15 @@ func parseSize(s string) (int, int) {
 func ensureDataFiles(namesPath, aliasPath string) {
 	dir := filepath.Dir(aliasPath)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		log.Printf("[!] 数据目录创建失败（%s）: %v", dir, err)
+		logError("数据目录创建失败（%s）: %v", dir, err)
 		return
 	}
 	if _, err := os.Stat(aliasPath); os.IsNotExist(err) {
 		tpl := []byte("{\n  \"names\": {},\n  \"merge\": {}\n}\n")
 		if err := os.WriteFile(aliasPath, tpl, 0o644); err != nil {
-			log.Printf("[!] 规则文件模板创建失败: %v", err)
+			logWarn("规则文件模板创建失败: %v", err)
 		} else {
-			log.Printf("[*] 已创建规则文件模板：%s", aliasPath)
+			logInfo("已创建规则文件模板：%s", aliasPath)
 		}
 	}
 }
@@ -77,12 +77,23 @@ func main() {
 		headless = flag.Bool("headless", false, "仅启动本地服务，不创建窗口（浏览器访问面板）")
 		size     = flag.String("size", "520x420", "overlay 窗口尺寸 WxH")
 		showVer  = flag.Bool("version", false, "打印版本号后退出")
+		logLvl   = flag.String("log-level", "warning", "日志级别：info / warning / error（默认 warning，只输出警告与错误）")
+		verbose  = flag.Bool("v", false, "显示 INFO 日志（等价 -log-level info）")
 	)
 	flag.Parse()
 	if *showVer {
 		fmt.Println("dpsmeter " + version)
 		return
 	}
+	lv, ok := parseLogLevel(*logLvl)
+	if !ok {
+		fmt.Fprintf(os.Stderr, "无效的 -log-level: %q（可选 info / warning / error）\n", *logLvl)
+		os.Exit(2)
+	}
+	if *verbose {
+		lv = levelInfo
+	}
+	minLogLevel = lv
 	setupLog()
 
 	namesPath := resolveDataFile(*data, "unit_names.json")
@@ -98,7 +109,8 @@ func main() {
 			filepath.Join(filepath.Dir(aliasPath), "subcache"), nil),
 		aliasPath: aliasPath,
 	}
-	log.Printf("[*] dpsmeter v%s 启动：http://%s（names=%s, alias=%s）", version, *addr, namesPath, aliasPath)
+	logInfo("dpsmeter v%s 启动：http://%s（log-level=%s, names=%s, alias=%s）",
+		version, *addr, minLogLevel, namesPath, aliasPath)
 	go s.dots.refresh() // 在线拉最新 index → 抽取 EnemyDot 编号表（fetch.go 同构）
 	go subLoop(s.subs)  // 订阅循环：启动刷一轮 + 配置 mtime/间隔触发的定时刷新
 
@@ -110,7 +122,7 @@ func main() {
 
 	if *headless {
 		if err := <-serveErr; err != nil {
-			log.Fatalf("[!] HTTP 服务失败: %v", err)
+			logFatal("HTTP 服务失败: %v", err)
 		}
 		for { // 纯服务形态：常驻直到进程被结束
 			time.Sleep(time.Hour)
@@ -121,7 +133,7 @@ func main() {
 	time.Sleep(300 * time.Millisecond) // 等服务起
 	select {
 	case err := <-serveErr:
-		log.Fatalf("[!] HTTP 服务失败: %v", err)
+		logFatal("HTTP 服务失败: %v", err)
 	default:
 	}
 	w, h := parseSize(*size)
