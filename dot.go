@@ -47,6 +47,11 @@ type dotStore struct {
 }
 
 func newDotStore(cacheDir string) *dotStore {
+	// 缓存目录在启动时就建好：编号表/meta/aar/png 都写这里，
+	// 首次运行（data/dotcache 尚不存在）也不能让写盘失败。
+	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
+		log.Printf("[!] 创建 dot 缓存目录失败: %v", err)
+	}
 	d := &dotStore{
 		cdn:      map[string][2]string{},
 		cacheDir: cacheDir,

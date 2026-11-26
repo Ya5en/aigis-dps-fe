@@ -3,13 +3,13 @@
         "FileVersion": {
             "Major": 1,
             "Minor": 2,
-            "Patch": 0,
+            "Patch": 1,
             "Build": 0
         },
         "ProductVersion": {
             "Major": 1,
             "Minor": 2,
-            "Patch": 0,
+            "Patch": 1,
             "Build": 0
         },
         "FileFlagsMask": "3f",
@@ -22,14 +22,14 @@
         "Comments": "千年戦争アイギス DPS 面板（SHM 只读桥 + overlay）",
         "CompanyName": "Ya5en",
         "FileDescription": "aigis-dps DPS 面板",
-        "FileVersion": "1.2.0",
+        "FileVersion": "1.2.1",
         "InternalName": "dpsmeter",
         "LegalCopyright": "© 2026 Ya5en",
         "LegalTrademarks": "aigis-dps",
         "OriginalFilename": "dpsmeter.exe",
         "PrivateBuild": "",
         "ProductName": "aigis-dps",
-        "ProductVersion": "1.2.0",
+        "ProductVersion": "1.2.1",
         "SpecialBuild": ""
     },
     "VarFileInfo": {
