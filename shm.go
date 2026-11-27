@@ -218,13 +218,12 @@ func (r *shmReader) poll() int {
 	return n
 }
 
-// jsonUnmarshalEv 解析 {"gf":..,"d":..,"ty":..,"ai":..,"ag":..,"vi":..,"vg":..}。
-// 字段少且全为 u32，手写迷你解析（无反射分配）：扫描 "key":数字 对即可。
+// jsonUnmarshalEv 解析 payload 中的 u32 业务字段。
+// 手写迷你解析（无反射分配）：扫描 "key":数字 对即可；非数字值（对象/数组/
+// 字符串/null）整段跳过，不报错——v10.53+ 载荷末尾新增 "ex":{...} 调试对象，
+// 老写法遇到 '{' 会 errBadJSON 把整条事件丢弃（新 writer 条条带 ex = 全丢）。
 func jsonUnmarshalEv(b []byte, out *ev) error {
-	// 手写迷你解析（无反射分配，稳且快）
-	// {"gf":20013,"d":7025,"ty":1,"ai":1469,"ag":3584,"vi":123,"vg":609}
-	i := 0
-	for i < len(b) {
+	for i := 0; i < len(b); {
 		if b[i] != '"' {
 			i++
 			continue
@@ -241,12 +240,24 @@ func jsonUnmarshalEv(b []byte, out *ev) error {
 		for k < len(b) && (b[k] == ':' || b[k] == ' ') {
 			k++
 		}
+		if k >= len(b) {
+			break
+		}
+		// ex 等嵌套容器：整段跳过（含内部同名键，避免污染业务字段）
+		if b[k] == '{' || b[k] == '[' {
+			i = skipJSONContainer(b, k)
+			continue
+		}
 		start := k
 		for k < len(b) && b[k] >= '0' && b[k] <= '9' {
 			k++
 		}
-		if k == start {
-			return errBadJSON
+		if k == start { // 非数字值：字符串/null/bool 等，跳到下个分隔符
+			for k < len(b) && b[k] != ',' && b[k] != '}' {
+				k++
+			}
+			i = k
+			continue
 		}
 		num := uint32(0)
 		for _, c := range b[start:k] {
@@ -271,6 +282,37 @@ func jsonUnmarshalEv(b []byte, out *ev) error {
 		i = k
 	}
 	return nil
+}
+
+// skipJSONContainer 从 '{' / '[' 起跳到配套闭合符之后；字符串内的括号不算层。
+// 未闭合时返回末尾——后续已无字段可读，调用方循环自然结束。
+func skipJSONContainer(b []byte, i int) int {
+	depth, inStr, esc := 0, false, false
+	for ; i < len(b); i++ {
+		c := b[i]
+		if inStr {
+			if esc {
+				esc = false
+			} else if c == '\\' {
+				esc = true
+			} else if c == '"' {
+				inStr = false
+			}
+			continue
+		}
+		switch c {
+		case '"':
+			inStr = true
+		case '{', '[':
+			depth++
+		case '}', ']':
+			depth--
+			if depth == 0 {
+				return i + 1
+			}
+		}
+	}
+	return i
 }
 
 type jsonErr string
