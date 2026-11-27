@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
 
 func TestJSONUnmarshalEvFormats(t *testing.T) {
 	cases := []struct {
@@ -37,12 +40,25 @@ func TestJSONUnmarshalEvFormats(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			var got ev
-			if err := jsonUnmarshalEv([]byte(c.line), &got); err != nil {
+			if err := json.Unmarshal([]byte(c.line), &got); err != nil {
 				t.Fatalf("解析失败: %v", err)
 			}
 			if got != c.want {
 				t.Fatalf("got %+v, want %+v", got, c.want)
 			}
 		})
+	}
+}
+
+func TestJSONUnmarshalEvRejectsMalformed(t *testing.T) {
+	// 上游竞态写半截时，原生解析应明确报错，而不是解析出半套字段
+	for _, line := range []string{
+		`{"gf":1,"ai":2`,
+		`{"gf":1,"ai":"not-a-number"}`,
+	} {
+		var got ev
+		if err := json.Unmarshal([]byte(line), &got); err == nil {
+			t.Fatalf("期望拒绝畸形载荷 %q，但解析成功: %+v", line, got)
+		}
 	}
 }

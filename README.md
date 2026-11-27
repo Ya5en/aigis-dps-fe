@@ -186,9 +186,10 @@ jsDelivr CDN（`https://cdn.jsdelivr.net/gh/<user>/<repo>@main/aliases.json`）�
 
 `.ashm` = zstd 压缩的 SHM 16MB 全量映像（头 + 槽表 + 事件环，字节级原样），
 导入时在映像副本上按 SHM 协议重放（复用 poll 全套校验：槽表发布位、ABA、
-gf 回退分段），会话标记 `src=import` 与实时数据隔离。事件 payload 兼容
-上游新旧两种输出：`gf/ai/ag/vi/vg/d/ty` 字段顺序无关，v10.53+ 末尾的
-`"ex":{...}` 调试对象整段跳过（内部同名键不参与统计）。导入入口从 Go 侧弹出
+gf 回退分段），会话标记 `src=import` 与实时数据隔离。事件 payload 由标准库
+`encoding/json` 解析：`gf/ai/ag/vi/vg/d/ty` 字段顺序无关，上游新增的未知字段
+（如 v10.53+ 的 `"ex":{...}` 调试对象）自动忽略，内部同名键不参与统计；
+畸形载荷明确报错并丢弃。导入入口从 Go 侧弹出
 系统文件选择框（comdlg32 `GetOpenFileNameW`，零依赖；overlay 形态下
 WebView2 的 JS 文件选择不可靠），用户取消返回 `{ok:false, canceled:true}`。
 

@@ -5,6 +5,7 @@ package main
 
 import (
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"syscall"
 	"unsafe"
@@ -55,14 +56,15 @@ func mapRead() ([]byte, uintptr, error) {
 func le32(b []byte, off int) uint32 { return binary.LittleEndian.Uint32(b[off:]) }
 
 // ev 一条伤害事件（payload JSON 字段）。
+// 未知字段（如上游 v10.53+ 的 "ex" 调试对象）由 encoding/json 自动忽略。
 type ev struct {
-	Gf uint32 // GameFrame
-	D  uint32 // 伤害值
-	Ty uint32 // 飘字颜色类型
-	Ai uint32 // 攻击者 CardID
-	Ag uint32 // 攻击者实例 gen
-	Vi uint32 // 受击者身份 id（同 vi = 同一只怪；v10.5+ 恒有，旧 DLL 缺省 0）
-	Vg uint32 // 受击者实体句柄 gen（每个 vg = 一个独立实体；v10.4+ 恒有，旧 DLL 缺省 0）
+	Gf uint32 `json:"gf"` // GameFrame
+	D  uint32 `json:"d"`  // 伤害值
+	Ty uint32 `json:"ty"` // 飘字颜色类型
+	Ai uint32 `json:"ai"` // 攻击者 CardID
+	Ag uint32 `json:"ag"` // 攻击者实例 gen
+	Vi uint32 `json:"vi"` // 受击者身份 id（同 vi = 同一只怪；v10.5+ 恒有，旧 DLL 缺省 0）
+	Vg uint32 `json:"vg"` // 受击者实体句柄 gen（每个 vg = 一个独立实体；v10.4+ 恒有，旧 DLL 缺省 0）
 }
 
 // Sink 聚合器回调接口。
@@ -86,8 +88,8 @@ type shmReader struct {
 	replayTarget uint32
 	// 事件级 gf 单调性哨兵：回放跨多场战斗时 meta.last_gf 不回退（writer
 	// 只反映实时），分段改由事件序列本身检测——e.Gf 回退 = 战斗边界。
-	lastEvGf  uint32
-	haveEvGf  bool
+	lastEvGf uint32
+	haveEvGf bool
 }
 
 func tryAttach(sink Sink) (*shmReader, error) {
@@ -199,7 +201,7 @@ func (r *shmReader) poll() int {
 		line := append(make([]byte, 0, end), raw[:end]...)
 
 		var e ev
-		if err := jsonUnmarshalEv(line, &e); err == nil {
+		if err := json.Unmarshal(line, &e); err == nil {
 			// 事件级战斗分段：回放期间 meta.last_gf 不回退（writer 只反映实时），
 			// 跨场边界由事件 gf 序列自身的回退检出（战斗内 gf 单调不减）。
 			if r.haveEvGf && e.Gf < r.lastEvGf {
@@ -217,106 +219,3 @@ func (r *shmReader) poll() int {
 	}
 	return n
 }
-
-// jsonUnmarshalEv 解析 payload 中的 u32 业务字段。
-// 手写迷你解析（无反射分配）：扫描 "key":数字 对即可；非数字值（对象/数组/
-// 字符串/null）整段跳过，不报错——v10.53+ 载荷末尾新增 "ex":{...} 调试对象，
-// 老写法遇到 '{' 会 errBadJSON 把整条事件丢弃（新 writer 条条带 ex = 全丢）。
-func jsonUnmarshalEv(b []byte, out *ev) error {
-	for i := 0; i < len(b); {
-		if b[i] != '"' {
-			i++
-			continue
-		}
-		j := i + 1
-		for j < len(b) && b[j] != '"' {
-			j++
-		}
-		if j >= len(b) {
-			return errBadJSON
-		}
-		key := string(b[i+1 : j])
-		k := j + 1
-		for k < len(b) && (b[k] == ':' || b[k] == ' ') {
-			k++
-		}
-		if k >= len(b) {
-			break
-		}
-		// ex 等嵌套容器：整段跳过（含内部同名键，避免污染业务字段）
-		if b[k] == '{' || b[k] == '[' {
-			i = skipJSONContainer(b, k)
-			continue
-		}
-		start := k
-		for k < len(b) && b[k] >= '0' && b[k] <= '9' {
-			k++
-		}
-		if k == start { // 非数字值：字符串/null/bool 等，跳到下个分隔符
-			for k < len(b) && b[k] != ',' && b[k] != '}' {
-				k++
-			}
-			i = k
-			continue
-		}
-		num := uint32(0)
-		for _, c := range b[start:k] {
-			num = num*10 + uint32(c-'0')
-		}
-		switch key {
-		case "gf":
-			out.Gf = num
-		case "d":
-			out.D = num
-		case "ty":
-			out.Ty = num
-		case "ai":
-			out.Ai = num
-		case "ag":
-			out.Ag = num
-		case "vi":
-			out.Vi = num
-		case "vg":
-			out.Vg = num
-		}
-		i = k
-	}
-	return nil
-}
-
-// skipJSONContainer 从 '{' / '[' 起跳到配套闭合符之后；字符串内的括号不算层。
-// 未闭合时返回末尾——后续已无字段可读，调用方循环自然结束。
-func skipJSONContainer(b []byte, i int) int {
-	depth, inStr, esc := 0, false, false
-	for ; i < len(b); i++ {
-		c := b[i]
-		if inStr {
-			if esc {
-				esc = false
-			} else if c == '\\' {
-				esc = true
-			} else if c == '"' {
-				inStr = false
-			}
-			continue
-		}
-		switch c {
-		case '"':
-			inStr = true
-		case '{', '[':
-			depth++
-		case '}', ']':
-			depth--
-			if depth == 0 {
-				return i + 1
-			}
-		}
-	}
-	return i
-}
-
-type jsonErr string
-
-func (e jsonErr) Error() string { return string(e) }
-
-const errBadJSON = jsonErr("bad payload json")
